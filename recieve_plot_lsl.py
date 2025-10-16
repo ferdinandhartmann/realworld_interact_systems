@@ -63,8 +63,8 @@ win.resize(1000, 800)
 win.setWindowTitle("Real-Time OpenSignals Viewer")
 
 plots, curves = [], []
-history_secs = 10
-sample_rate = 100
+history_secs = 1000
+sample_rate = 1
 max_samples = history_secs * sample_rate
 
 data = [deque(maxlen=max_samples) for _ in usable_channels]
@@ -87,15 +87,15 @@ for plot_idx, ch_idx in enumerate(usable_channels):
     plots.append(p)
     curves.append(c)
 
-    # 3.1. Print channel data every second
-    def print_channel_data():
-        for idx, ch_idx in enumerate(usable_channels):
-            print(f"{channels_meta[ch_idx][0]}: {list(data[idx])[-3:]}")
-        print(" ")
-            
-    print_timer = QtCore.QTimer()
-    print_timer.timeout.connect(print_channel_data)
-    print_timer.start(1000)  # 1000 ms = 1 second
+    # # 3.1. Print channel data every second
+    # def print_channel_data():
+    #     for idx, ch_idx in enumerate(usable_channels):
+    #         print(f"{channels_meta[ch_idx][0]}: {list(data[idx])[-3:]}")
+    #     print(" ")
+
+    # print_timer = QtCore.QTimer()
+    # print_timer.timeout.connect(print_channel_data)
+    # print_timer.start(1000)  # 1000 ms = 1 second
 
 # ------------------------------------------------------
 # 4. Live update function
@@ -104,9 +104,9 @@ def update():
     global sample_counter
     sample, timestamp = inlet.pull_sample(timeout=0.0)
     if sample is not None:
+
         sample_counter += 1
-        t = sample_counter / sample_rate
-        x_axis.append(t)
+        x_axis.append(timestamp*1000)
 
         # Convert voltage back to 10-bit ADC range (0-1023) #####################
         # adc_values = [s * 1023 / 3.3 for s in sample]
@@ -115,7 +115,7 @@ def update():
         for idx, ch_idx in enumerate(usable_channels):
             data[idx].append(adc_values[ch_idx - 1])
             curves[idx].setData(list(x_axis), list(data[idx]))
-            plots[idx].setXRange(max(0, t - history_secs), t)
+            plots[idx].setXRange(max(0, timestamp - history_secs), timestamp)
 
 
 timer = QtCore.QTimer()

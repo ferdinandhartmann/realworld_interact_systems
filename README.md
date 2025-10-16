@@ -7,3 +7,5 @@ This project utilizes **rock_paper_scissor.ipynb** to detect hand movements for 
 - **1**: Paper
 - **2**: Rock
 - **3**: Scissors
+
+For live classification then run **live_classification.py**
