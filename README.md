@@ -9,3 +9,6 @@ This project utilizes **rock_paper_scissor.ipynb** to detect hand movements for 
 - **3**: Scissors
 
 For live classification then run **live_classification.py**
+
+Also a live ECG Heart and heart rate moitoring
+<img width="1505" height="1032" alt="image" src="https://github.com/user-attachments/assets/a5180275-dcb0-4175-a417-26fc99783f4f" />
