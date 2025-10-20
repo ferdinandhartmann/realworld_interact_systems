@@ -13,7 +13,7 @@ For live classification then run **live_classification.py**
 
 ### Updated Rock, Paper, Scissors Estimation:
 For the updated Rock, Paper, Scissors estimation with MLP:
-- Use **rock_paper_scissor_2.py** to train the model with the `min_data`.
+- Use **rock_paper_scissor_2.py** to train the model with the `min_data`. (Data was collected with CH2 on flexor on underarm and CH4 on extension on underarm)
 - Use **live_classification_2.py** for live classification.
 - The script **feature_utils.py** is utilized to extract the necessary features.
 
