@@ -19,7 +19,11 @@ For the updated Rock, Paper, Scissors estimation with MLP:
 
 
 
-Also a live ECG Heart and heart rate moitoring
+https://github.com/user-attachments/assets/75693e20-819d-44a5-919e-fed72749256f
+
+
+
+### Also a live ECG Heart and heart rate moitoring
 <img width="1505" height="1032" alt="image" src="https://github.com/user-attachments/assets/a5180275-dcb0-4175-a417-26fc99783f4f" />
 
 
