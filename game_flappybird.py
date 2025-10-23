@@ -25,7 +25,7 @@ from typing import Tuple, Optional
 
 import math, random, sys
 import pygame as pg
-from game_input import KeyboardInput, RealEMGInput, SmoothedInput
+from game_input import KeyboardInput, RealEMGInput, SmoothedInput, EEGBlinkInput
 
 WIDTH, HEIGHT = 400, 600
 FPS = 60
@@ -73,7 +73,11 @@ def main():
     # Input sources
     kb = KeyboardInput(pg)
     real = RealEMGInput()
-    input_src = SmoothedInput(kb if not USE_EMG else real, alpha=0.3, deadzone=0.05)
+    eeg = EEGBlinkInput()
+
+    mode = 2  # 0 = keyboard, 1 = EMG, 2 = EEG
+    sources = [kb, real, eeg]
+    input_src = SmoothedInput(sources[mode], alpha=0.3, deadzone=0.05)
 
     bird = pg.Rect(BIRD_X, HEIGHT//2, 28, 20)
     vel_y = 0.0
@@ -91,15 +95,15 @@ def main():
                 running = False
             elif event.type == pg.KEYDOWN:
                 if event.key == pg.K_m:
-                    USE_EMG = not USE_EMG
-                    input_src = SmoothedInput(kb if not USE_EMG else real, alpha=0.3, deadzone=0.05)
-                if not USE_EMG and (event.key in (pg.K_SPACE, pg.K_UP)):
+                    mode = (mode + 1) % 3
+                    input_src = SmoothedInput(sources[mode], alpha=0.3, deadzone=0.05)
+                if mode == 0 and (event.key in (pg.K_SPACE, pg.K_UP)):
                     vel_y = FLAP_VEL
                     started = True
 
         # Read input
         flex, ext = input_src.read()
-        if USE_EMG and flex > EMG_FLAP_THRESHOLD:
+        if mode == 1 and flex > EMG_FLAP_THRESHOLD:
             vel_y = FLAP_VEL
             started = True
 
@@ -150,8 +154,8 @@ def main():
         pg.draw.rect(screen, (255, 220, 0), bird, border_radius=6)
 
         # HUD
-        mode = "EMG" if USE_EMG else "Keyboard"
-        draw_text(screen, f"Mode: {mode}  Score: {score}", 20, WIDTH//2, 10)
+        mode_names = ["Keyboard", "EMG", "EEG Blink"]
+        draw_text(screen, f"Mode: {mode_names[mode]}  Score: {score}", 20, WIDTH//2, 10)
         draw_text(screen, f"Flex:{flex:.2f} Ext:{ext:.2f}  (M to toggle)", 18, WIDTH//2, 36, (180,180,200))
 
         pg.display.flip()
@@ -161,4 +165,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

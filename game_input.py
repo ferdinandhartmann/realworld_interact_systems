@@ -1,66 +1,194 @@
-from typing import Tuple, Optional
+from typing import Tuple
+import numpy as np
+from bitalino import BITalino
+from scipy.signal import butter, lfilter
+import time
 
+
+# ====== CONFIG ======
+EEG_MAC = "98:D3:11:FE:02:74"
+EEG_CHANNEL = 0
+EEG_FS = 1000
+EEG_VCC = 3.0
+EEG_GAIN = 41780.0
+THRESHOLD_UV_LOW = 35.0  # same as your reaction.py threshold
+N_SAMPLES = 15
+EMG_RATIO_OFFSET = 0.5
+# =====================
+
+
+# ====== Base classes ======
 class InputSource:
-    def read(self) -> Tuple[float, float]:
+    def read(self) -> float:
         """Return (flex, ext) in [0,1]. Override in subclasses."""
-        return 0.0, 0.0
+        return 0.0
+
 
 class KeyboardInput(InputSource):
-    """
-    Maps keyboard to pseudo-EMG:
-      - Flex: SPACE or UP = 1.0 (press & hold)
-      - Ext:  DOWN = 1.0 (press & hold)
-    """
+    """Keyboard input mapped to pseudo-EMG (using pygame)."""
+
     def __init__(self, pygame):
         self.pg = pygame
 
-    def read(self) -> Tuple[float, float]:
+    def read(self) -> float:
         keys = self.pg.key.get_pressed()
-        flex = 1.0 if (keys[self.pg.K_SPACE] or keys[self.pg.K_UP]) else 0.0
-        ext  = 1.0 if keys[self.pg.K_DOWN] else 0.0
-        return flex, ext
+        ratio = 1.0 if (keys[self.pg.K_SPACE] or keys[self.pg.K_UP]) else (0.5 if keys[self.pg.K_DOWN] else 0.0)
+        return ratio
+
+
+import threading, time
+from collections import deque
+import numpy as np
+from bitalino import BITalino
+
 
 class RealEMGInput(InputSource):
-    """
-    Skeleton for *real* EMG input. Replace `read()` with your acquisition code.
-    Ensure you normalize to [0,1] (after rectification, filtering, smoothing).
-    """
-    def __init__(self):
-        # Example: set up your serial/socket/device here.
-        # self.dev = ...
-        # self.flex_bias = 0.0
-        # self.ext_bias  = 0.0
-        pass
+    """Non-blocking EMG input using a background thread that outputs ratio."""
 
-    def read(self) -> Tuple[float, float]:
-        # >>> Replace this with your real EMG access <<<<
-        # Example pseudo-code:
-        # raw_flex = get_flex_channel_value()
-        # raw_ext  = get_ext_channel_value()
-        # flex = normalize(abs(raw_flex - self.flex_bias))
-        # ext  = normalize(abs(raw_ext  - self.ext_bias))
-        # return clamp(flex,0,1), clamp(ext,0,1)
-        return 0.0, 0.0
+    def __init__(
+        self, mac="98:D3:11:FE:02:74", fs=1000, channels=(1, 3), n_samples=100
+    ):
+        self.dev = BITalino(mac)
+        self.dev.start(fs, list(channels))
+        self.fs = fs
+        self.channels = channels
+        self.n_samples = n_samples
+        self.ratio = 1.0
+        self._running = True
+
+        self.thread = threading.Thread(target=self._reader, daemon=True)
+        self.thread.start()
+        print(f"✅ Async RealEMGInput running on channels {channels} @ {fs} Hz")
+
+    def _reader(self):
+        while self._running:
+            try:
+                samples = self.dev.read(self.n_samples)
+                raw = samples[:, 5:].astype(float)
+                flex = raw[:, 0]
+                ext = raw[:, 1]
+
+                flex_mv = (flex / (2**16 - 1)) * 3.3
+                ext_mv = (ext / (2**16 - 1)) * 3.3
+
+                flex_std = np.std(flex_mv)
+                ext_std = np.std(ext_mv)
+                self.ratio = (flex_std + 1e-6) / (ext_std + 1e-6)
+
+            except Exception as e:
+                print("⚠️ EMG read error:", e)
+                time.sleep(0.05)
+
+    def read(self) -> float:
+        return self.ratio
+
+    def close(self):
+        self._running = False
+        try:
+            self.dev.stop()
+            self.dev.close()
+            print("🧠 BITalino device closed.")
+        except Exception as e:
+            print("⚠️ Error closing BITalino:", e)
+
 
 class SmoothedInput(InputSource):
-    """
-    Wraps another InputSource and applies exponential smoothing & deadzones.
-    """
-    def __init__(self, source: InputSource, alpha: float = 0.25, deadzone: float = 0.05):
+    """Applies exponential smoothing & deadzone to ratio-based input."""
+
+    def __init__(
+        self,
+        source: InputSource,
+        alpha: float = 0.5,
+        deadzone: float = 0.05,
+        offset: float = 0.5
+    ):
         self.src = source
         self.alpha = float(alpha)
         self.dead = float(deadzone)
-        self.flex = 0.0
-        self.ext  = 0.0
+        self.ratio = 0.0
+        self.offset = float(offset)
 
-    def read(self) -> Tuple[float, float]:
-        f, e = self.src.read()
+    def read(self) -> float:
+        self.ratio = self.src.read()
 
-        # clamp
-        f = 0.0 if f < self.dead else max(0.0, min(1.0, f))
-        e = 0.0 if e < self.dead else max(0.0, min(1.0, e))
+        # ratio = np.clip(ratio, 0.0, 4.0)
+        # # normalize from 0 to 3 to 0 to 1
+        # ratio = ratio / 4.0
+        self.ratio -= self.offset
 
-        # smooth
-        self.flex = self.alpha * f + (1 - self.alpha) * self.flex
-        self.ext  = self.alpha * e + (1 - self.alpha) * self.ext
-        return self.flex, self.ext
+        # # apply deadzone
+        # if ratio < self.dead:
+        #     ratio = 0.0
+
+        # # exponential smoothing
+        # self.ratio = self.alpha * ratio + (1 - self.alpha) * self.ratio
+
+        # Debug (can disable for performance)
+        # print(f"SmoothedInput: raw={ratio:.3f}, smoothed={self.ratio:.3f}")
+        return self.ratio
+
+
+# ====== EEG Blink Detector ======
+class EEGBlinkInput(InputSource):
+    """
+    Reads EEG signal from BITalino and detects blinks.
+    Output: (blink_detected, 0.0)
+    """
+
+    def __init__(self, mac=EEG_MAC, channel=EEG_CHANNEL, threshold_uv=THRESHOLD_UV_LOW):
+        self.dev = BITalino(mac)
+        self.dev.start(EEG_FS, [channel])
+        self.channel = channel
+        self.buffer = np.zeros(0)
+        self.threshold = threshold_uv  # µV threshold, same as reaction.py
+        self.last_blink_time = 0.0
+        self.min_blink_interval = 0.1  # seconds to ignore double detections
+        print(f"✅ EEGBlinkInput initialized on channel {channel} @ {EEG_FS} Hz")
+
+    # --- conversion helpers ---
+    def adc_to_microvolt(self, adc):
+        eeg_v = ((adc / (2**16 - 1)) - 0.5) * (EEG_VCC / EEG_GAIN)
+        return eeg_v * 1e6
+
+    def bandpass_filter(self, data, lowcut=1.0, highcut=15.0, order=2):
+        b, a = butter(
+            order, [lowcut / (EEG_FS / 2), highcut / (EEG_FS / 2)], btype="band"
+        )
+        return lfilter(b, a, data)
+
+    # --- main read ---
+    def read(self) -> float:
+        try:
+            samples = self.dev.read(N_SAMPLES)
+            raw = samples[:, 5 + self.channel].astype(float)
+            microvolt = self.adc_to_microvolt(raw)
+            microvolt = abs(microvolt)
+
+                    # preprocess
+            # filt = self.bandpass_filter(microvolt)
+            amplitude = np.max(microvolt)
+            # --- blink detection logic ---
+            blink_detected = 0.0
+            now = time.time()
+            if (
+                amplitude < self.threshold
+                and (now - self.last_blink_time) > self.min_blink_interval
+            ):
+                blink_detected = 1.0
+                self.last_blink_time = now
+                print(f"⚡ EEG Blink detected — peak {amplitude:.1f} µV")
+
+            return blink_detected
+
+        except Exception as e:
+            print(f"⚠️ Error reading BITalino: {e}")
+            return 0.0
+
+    # --- clean shutdown ---
+    def close(self):
+        try:
+            self.dev.stop()
+            self.dev.close()
+            print("🧠 BITalino EEG device closed.")
+        except Exception as e:
+            print(f"⚠️ Error closing BITalino: {e}")

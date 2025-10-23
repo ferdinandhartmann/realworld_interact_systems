@@ -8,26 +8,28 @@ import math, random, sys
 import pygame as pg
 from game_input import KeyboardInput, RealEMGInput, SmoothedInput
 
-WIDTH, HEIGHT = 800, 360
-FPS = 100
+WIDTH, HEIGHT = 1400, 1000
+FPS = 60
 
-GROUND_Y = 300
+GROUND_Y = 500
 SCROLL_SPEED = 6.0
 
 JUMP_BASE = 8       # base jump impulse
-JUMP_BOOST = 2     # scaled by flex [0..1]
-GRAVITY = 0.8 
+JUMP_BOOST = 3     # scaled by flex [0..1]
+JUMP_BOOST_2 = 1.5  # scaled by flex [0..1]
+GRAVITY = 0.8
 AIR_DRAG = 0.99       # mild air damping
 DUCK_SCALE = 0.5
-EMG_JUMP_DEADZONE = 0.15
-EMG_DUCK_THRESHOLD = 0.25
-COYOTE_TIME = 120     # ms after leaving ground where jump is still allowed
+EMG_JUMP_DEADZONE = 0.5
+EMG_DUCK_THRESHOLD = -0.25
+# COYOTE_TIME = 120     # ms after leaving ground where jump is still allowed
 OBSTACLE_EVERY = (900, 1500)  # ms range
 player_w, player_h = 34, 60
+MAX_JUMPS = 2
 
 FONT_NAME = "arial"
 
-USE_EMG = False  # default: keyboard. Press "M" to toggle at runtime.
+USE_EMG = True  # default: keyboard. Press "M" to toggle at runtime.
 
 
 pg.mixer.init(frequency=44100, size=-16, channels=1)
@@ -65,8 +67,6 @@ hit_sound   = tone(200, 0.15, 0.56)
 score_sound = tone(1000, 0.12, 0.4)
 
 
-
-
 def draw_text(surf, text, size, x, y, color=(255,255,255)):
     font = pg.font.SysFont(FONT_NAME, size, bold=True)
     img = font.render(text, True, color)
@@ -84,10 +84,50 @@ def make_obstacle():
     elif kind == "wide":
         rect = pg.Rect(WIDTH + 30, GROUND_Y - 35, 60, 35)      # jump over
     elif kind == "overhead":
-        height = 40
-        y_top = GROUND_Y - player_h  - 20  # hangs above player
+        height = 100
+        y_top = GROUND_Y - player_h  - 30  # hangs above player
         rect = pg.Rect(WIDTH + 40, y_top, 60, height)          # duck under
     return rect
+
+
+def calibrate_emg(screen, real_emg, duration=3.0):
+    """Measure EMG rest offset for given duration (seconds)."""
+    font = pg.font.SysFont(FONT_NAME, 28, bold=True)
+    clock = pg.time.Clock()
+    samples = []
+
+    start_time = pg.time.get_ticks()
+    while (pg.time.get_ticks() - start_time) < duration * 1000:
+        for event in pg.event.get():  # allow quitting during calibration
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+        screen.fill((20, 24, 32))
+        text = font.render(
+            "Please relax your muscles... Calibrating baseline", True, (230, 230, 160)
+        )
+        rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+        screen.blit(text, rect)
+
+        # --- countdown ---
+        elapsed = (pg.time.get_ticks() - start_time) / 1000
+        remaining = max(0, duration - elapsed)
+        countdown_text = font.render(f"{remaining:.1f} s", True, (255, 255, 180))
+        countdown_rect = countdown_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 40))
+        screen.blit(countdown_text, countdown_rect)
+
+        # --- collect EMG data ---
+        ratio = real_emg.read()
+        samples.append(ratio)
+
+        pg.display.flip()
+        clock.tick(60)
+
+    # --- compute baseline offset ---
+    offset = float(np.mean(samples))
+    print(f"✅ EMG baseline offset calibrated: {offset:.3f}")
+    return offset
 
 
 def main():
@@ -100,8 +140,16 @@ def main():
     # Input
     kb = KeyboardInput(pg)
     real = RealEMGInput()
-    input_src = SmoothedInput(kb if not USE_EMG else real, alpha=0.25, deadzone=0.05)
+    input_src = kb if not USE_EMG else SmoothedInput(real)
 
+    # --- Calibration phase ---
+    if USE_EMG:
+        EMG_OFFSET = calibrate_emg(screen, real)
+        input_src = SmoothedInput(real)
+        input_src.offset = EMG_OFFSET
+    else:
+        input_src = kb
+        
     # Player
     player = pg.Rect(120, GROUND_Y - player_h, player_w, player_h)
     player_y = float(player.bottom)  # use float for vertical position
@@ -109,6 +157,7 @@ def main():
     ducking = False
     on_ground = True
     last_on_ground_ms = pg.time.get_ticks()
+    jumps_remaining = MAX_JUMPS
 
     # World
     obstacles = []
@@ -125,12 +174,10 @@ def main():
                 pg.quit()
                 sys.exit()
             elif event.type == pg.KEYDOWN:
-                if event.key == pg.K_m:
+                if event.key == pg.K_m: # check for mode toggle key
                     USE_EMG = not USE_EMG
-                    input_src = SmoothedInput(
-                        kb if not USE_EMG else real, alpha=0.25, deadzone=0.05
-                    )
-        
+                    input_src = kb if not USE_EMG else SmoothedInput(real)
+
         # --- Obstacle spawning ---
         now = pg.time.get_ticks()
 
@@ -140,37 +187,49 @@ def main():
             # choose a random time (in milliseconds) until the next spawn
             next_obstacle_ms = now + random.randint(800, 1400)
 
-
         # Read inputs
-        flex, ext = input_src.read()
+        ratio = input_src.read()
         keys = pg.key.get_pressed()
 
         if not USE_EMG:
             request_jump = keys[pg.K_SPACE] or keys[pg.K_UP]
             request_duck = keys[pg.K_DOWN]
         else:
-            request_jump = flex > EMG_JUMP_DEADZONE
-            request_duck = ext > EMG_DUCK_THRESHOLD
+            request_jump = ratio > EMG_JUMP_DEADZONE
+            request_duck = ratio < EMG_DUCK_THRESHOLD
 
         # --- Ground contact check ---
         if player_y >= GROUND_Y:
             on_ground = True
             player_y = GROUND_Y
             vy = 0.0
+            jumps_remaining = MAX_JUMPS
             last_on_ground_ms = pg.time.get_ticks()
         else:
             on_ground = False
 
         # --- Jump logic ---
-        if request_jump:
-            can_jump = on_ground or (pg.time.get_ticks() - last_on_ground_ms) <= COYOTE_TIME
-            if can_jump:
+
+        # --- Track rising edge of jump ---
+        if 'prev_jump' not in locals():
+            prev_jump = False
+        just_pressed_jump = request_jump and not prev_jump
+        prev_jump = request_jump
+
+        # --- Jump logic (with double jump) ---
+        if just_pressed_jump:
+            if jumps_remaining > 0:
                 if USE_EMG:
-                    impulse = JUMP_BASE + JUMP_BOOST * max(0.0, min(1.0, flex))
+                    impulse = JUMP_BASE + (JUMP_BOOST if jumps_remaining == 2 else JUMP_BOOST_2) * max(0.0, ratio)
                 else:
-                    impulse = JUMP_BASE + 0.8 * JUMP_BOOST
+                    impulse = JUMP_BASE + 0.8*(JUMP_BOOST if jumps_remaining == 2 else JUMP_BOOST_2)
+
+                # Optional: make second jump slightly weaker
+                if jumps_remaining == 1:
+                    impulse *= 0.85
                 vy = -impulse
                 on_ground = False
+                jumps_remaining -= 1
                 jump_sound.play()
 
         # --- Ducking (only when grounded) ---
@@ -236,8 +295,6 @@ def main():
                 on_ground = True
                 next_obstacle_ms = pg.time.get_ticks() + 1000
 
-
-
         # Draw
         screen.fill((20, 24, 32))
 
@@ -256,12 +313,21 @@ def main():
         # HUD
         mode = "EMG" if USE_EMG else "Keyboard"
         draw_text(screen, f"Mode: {mode}  Score: {score}", 20, 10, 8)
-        draw_text(screen, f"Flex:{flex:.2f} Ext:{ext:.2f}  (M to toggle)", 18, 10, 32, (180,180,200))
+        # draw_text(screen, f"Flex:{flex:.2f} Ext:{ext:.2f}  (M to toggle)", 18, 10, 32, (180,180,200))
         if not alive:
-            draw_text(screen, "Game Over - press M to toggle input or close window", 18, 10, 56, (255,150,150))
+            draw_text(screen, "Game Over - press M to toggle input or close window", 18, 10, 40, (255,150,150))
+        if USE_EMG:
+            draw_text(
+                screen, f"Raw Ratio          :{input_src.src.ratio:.2f}", 18, 10, 65, (200, 200, 100)
+            )
+            draw_text(
+                screen, f"Smoothed Ratio:{ratio:.2f}", 18, 10, 85, (200, 200, 100)
+            )
+        draw_text(
+            screen, f"Jumps Left: {jumps_remaining}", 18, 10, 110, (200, 200, 200)
+        )
 
         pg.display.flip()
 
 if __name__ == "__main__":
     main()
-

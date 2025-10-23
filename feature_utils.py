@@ -14,7 +14,7 @@ def spectral(sig, fs=1000):
 
 
 def extract_emg_features(segment, fs=1000):
-    """Extract 17 EMG features (8 per channel + ratio) and optionally normalize."""
+    """Extract 17 EMG features (8 per channel + ratio)."""
     ch_flex = bsnb.raw_to_phy("EMG", "biosignalsplux", segment[:, 0], 16, "mV")
     ch_ext = bsnb.raw_to_phy("EMG", "biosignalsplux", segment[:, 1], 16, "mV")
 
@@ -36,3 +36,13 @@ def extract_emg_features(segment, fs=1000):
     features = np.concatenate([f1, f2, [ratio]])
 
     return features
+
+
+def extract_emg_ratio(segment, fs=1000):
+    """Extract 17MG ratio."""
+    ch_flex = bsnb.raw_to_phy("EMG", "biosignalsplux", segment[:, 0], 16, "mV")
+    ch_ext = bsnb.raw_to_phy("EMG", "biosignalsplux", segment[:, 1], 16, "mV")
+
+    ratio = (np.std(ch_flex) + 1e-6) / (np.std(ch_ext) + 1e-6)
+    
+    return ratio
