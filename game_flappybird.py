@@ -145,6 +145,7 @@ def main():
 
         # Draw
         screen.fill((25, 25, 35))
+        
         # Pipes
         for idx, p in enumerate(pipes):
             color = (50, 200, 90) if idx % 2 == 0 else (50, 200, 90)

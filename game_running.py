@@ -7,25 +7,30 @@
 import math, random, sys
 import pygame as pg
 from game_input import KeyboardInput, RealEMGInput, SmoothedInput
+import numpy as np
+import pygame as pg
+import os
 
-WIDTH, HEIGHT = 1400, 1000
-FPS = 60
+WIDTH, HEIGHT = 1400, 750
+FPS = 100
 
-GROUND_Y = 500
+GROUND_Y = 600
 SCROLL_SPEED = 6.0
 
-JUMP_BASE = 8       # base jump impulse
-JUMP_BOOST = 3     # scaled by flex [0..1]
+JUMP_BASE = 11  # base jump impulse
+JUMP_BOOST = 3.85  # scaled by flex [0..1]
 JUMP_BOOST_2 = 1.5  # scaled by flex [0..1]
 GRAVITY = 0.8
-AIR_DRAG = 0.99       # mild air damping
+AIR_DRAG = 0.99  # mild air damping
 DUCK_SCALE = 0.5
 EMG_JUMP_DEADZONE = 0.5
-EMG_DUCK_THRESHOLD = -0.25
-# COYOTE_TIME = 120     # ms after leaving ground where jump is still allowed
-OBSTACLE_EVERY = (900, 1500)  # ms range
+EMG_DUCK_THRESHOLD = -0.09
+ADDITIONAL_OFFSET = -0.15
+OBSTACLE_EVERY = (650, 1300)  # ms range
 player_w, player_h = 34, 60
 MAX_JUMPS = 2
+
+LEVEL_UP_THRESHOLD = 8
 
 FONT_NAME = "arial"
 
@@ -34,67 +39,93 @@ USE_EMG = True  # default: keyboard. Press "M" to toggle at runtime.
 
 pg.mixer.init(frequency=44100, size=-16, channels=1)
 # Load your sound effects
-# jump_sound = pg.mixer.Sound("sounds/jump.wav")
-# duck_sound = pg.mixer.Sound("sounds/duck.wav")
-# hit_sound = pg.mixer.Sound("sounds/hit.wav")
-# score_sound = pg.mixer.Sound("sounds/score.wav")
+SOUNDS_DIR = "game_sounds"
 
-# Optional: adjust volume (0.0–1.0)
-# jump_sound.set_volume(0.4)
-# duck_sound.set_volume(0.3)
-# hit_sound.set_volume(0.5)
-# score_sound.set_volume(0.3)
+brass_fail_drops = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "brass_fail_drops.mp3"))
+game_over = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "game_over.mp3"))
+losing_horn = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "losing_horn.mp3"))
+fail_sounds = [brass_fail_drops, game_over, losing_horn]
+
+fall_down_whistle = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "fall_down_whistle.mp3"))
+
+# cartoon_jump = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "cartoon_jump.mp3"))
+cartoon_jump = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "point_lower.mp3"))
+
+hitting_sandbag = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "hitting_sandbag.mp3"))
+
+oha_ohh = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "oha_ohh.mp3"))
+uh = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "uh.mp3"))
+hit_sounds = [uh]
+
+get_coin = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "get_coin.mp3"))
+get_coin_low = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "get_coin_low.mp3"))
+point_smooth_beep = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "point_smooth_beep.mp3"))
+score_sounds = [point_smooth_beep]
+
+levelup = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "levelup_trimmed.mp3"))
+start = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "start.mp3"))
+
+hitting_sandbag.set_volume(0.3)
+point_smooth_beep.set_volume(0.3)
+oha_ohh.set_volume(0.4)
+losing_horn.set_volume(0.8)
 
 
-import numpy as np
-import pygame as pg
-
-pg.mixer.init(frequency=44100, size=-16, channels=1)
-SAMPLE_RATE = 44100
-
-def tone(freq=440, dur=0.15, vol=0.5):
-    """Generate a simple sine-wave tone and return as pygame Sound."""
-    n = int(SAMPLE_RATE * dur)
-    t = np.linspace(0, dur, n, False)
-    wave = np.sin(2 * np.pi * freq * t)
-    audio = (wave * (2**15 - 1) * vol).astype(np.int16)
-    return pg.sndarray.make_sound(audio)
-
-# Pre-generate sounds
-jump_sound  = tone(900, 0.2, 0.2)
-duck_sound  = tone(400, 0.22, 0.34)
-hit_sound   = tone(200, 0.15, 0.56)
-score_sound = tone(1000, 0.12, 0.4)
-
-
-def draw_text(surf, text, size, x, y, color=(255,255,255)):
+def draw_text(surf, text, size, x, y, color=(255, 255, 255)):
     font = pg.font.SysFont(FONT_NAME, size, bold=True)
     img = font.render(text, True, color)
     rect = img.get_rect()
-    rect.topleft = (x,y)
+    rect.topleft = (x, y)
     surf.blit(img, rect)
 
+
+class Obstacle(pg.Rect):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hit = False
+
+
 def make_obstacle():
-    kind = random.choice(["small", "tall", "wide", "overhead"])
+    kind = random.choice(
+        ["small", "tall", "wide", "overhead", "overhead_2", "overhead_higher"]
+    )
 
     if kind == "small":
-        rect = pg.Rect(WIDTH + 30, GROUND_Y - 30, 26, 30)      # jump over
+        width = 30
+        height = 35
+        rect = Obstacle(WIDTH + width, GROUND_Y - height, width, height)  # jump over
     elif kind == "tall":
-        rect = pg.Rect(WIDTH + 30, GROUND_Y - 50, 28, 50)      # jump over
+        width = 30
+        height = 60
+        rect = Obstacle(WIDTH + width, GROUND_Y - height, width, height)  # jump over
     elif kind == "wide":
-        rect = pg.Rect(WIDTH + 30, GROUND_Y - 35, 60, 35)      # jump over
+        width = 60
+        height = 40
+        rect = Obstacle(WIDTH + width, GROUND_Y - height, width, height)  # jump over
     elif kind == "overhead":
-        height = 100
-        y_top = GROUND_Y - player_h  - 30  # hangs above player
-        rect = pg.Rect(WIDTH + 40, y_top, 60, height)          # duck under
+        width = 70
+        height = 240
+        y_top = GROUND_Y - player_h - 215  # hangs above player
+        rect = Obstacle(WIDTH + width, y_top, width, height)  # duck under
+    elif kind == "overhead_2":
+        width = 35
+        height = 70
+        y_top = GROUND_Y - player_h - 60  # hangs above player
+        rect = Obstacle(WIDTH + width, y_top, width, height)  # duck under
+    elif kind == "overhead_higher":
+        width = 250
+        height = 40
+        y_top = GROUND_Y - player_h - 120  # hangs above player
+        rect = Obstacle(WIDTH + width / 10, y_top, width, height)  # duck under
     return rect
 
 
-def calibrate_emg(screen, real_emg, duration=3.0):
+def calibrate_emg(screen, real_emg, duration=2.0):
     """Measure EMG rest offset for given duration (seconds)."""
-    font = pg.font.SysFont(FONT_NAME, 28, bold=True)
+    font = pg.font.SysFont(FONT_NAME, 30, bold=False)
     clock = pg.time.Clock()
     samples = []
+    ext_vector = []
 
     start_time = pg.time.get_ticks()
     while (pg.time.get_ticks() - start_time) < duration * 1000:
@@ -105,7 +136,7 @@ def calibrate_emg(screen, real_emg, duration=3.0):
 
         screen.fill((20, 24, 32))
         text = font.render(
-            "Please relax your muscles... Calibrating baseline", True, (230, 230, 160)
+            "Please stay in resting position. Calibrating offsets...", True, (230, 230, 160)
         )
         rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
         screen.blit(text, rect)
@@ -120,20 +151,37 @@ def calibrate_emg(screen, real_emg, duration=3.0):
         # --- collect EMG data ---
         ratio = real_emg.read()
         samples.append(ratio)
+        ext = real_emg.get_ext_std()
+        ext_vector.append(ext)
 
         pg.display.flip()
         clock.tick(60)
 
     # --- compute baseline offset ---
     offset = float(np.mean(samples))
+    real_emg.boost_ext_threshold = float(np.mean(ext_vector)) * 1.5
     print(f"✅ EMG baseline offset calibrated: {offset:.3f}")
+    print(f"✅ EMG ext std threshold calibrated: {real_emg.boost_ext_threshold:.6f}")
     return offset
 
 
 def main():
-    global USE_EMG
+    global USE_EMG, _jump_base, _jump_boost, _jump_boost_2
     pg.init()
     screen = pg.display.set_mode((WIDTH, HEIGHT))
+
+    # --- Show connecting screen ---
+    font = pg.font.SysFont(FONT_NAME, 33, bold=False)
+    font2 = pg.font.SysFont(FONT_NAME, 25, bold=False)
+    screen.fill((20, 24, 32))
+    text = font.render("Connecting to BITalino Device...", True, (255, 255, 180))
+    rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40))
+    text2 = font2.render("Please move your arm into the resting position ...", True, (255, 255, 180))
+    rect2 = text.get_rect(center=(WIDTH // 2 -30, HEIGHT // 2 + 80))
+    screen.blit(text, rect)
+    screen.blit(text2, rect2)
+    pg.display.flip()
+
     pg.display.set_caption("Runner EMG")
     clock = pg.time.Clock()
 
@@ -146,10 +194,10 @@ def main():
     if USE_EMG:
         EMG_OFFSET = calibrate_emg(screen, real)
         input_src = SmoothedInput(real)
-        input_src.offset = EMG_OFFSET
+        input_src.offset = EMG_OFFSET + ADDITIONAL_OFFSET
     else:
         input_src = kb
-        
+
     # Player
     player = pg.Rect(120, GROUND_Y - player_h, player_w, player_h)
     player_y = float(player.bottom)  # use float for vertical position
@@ -158,6 +206,22 @@ def main():
     on_ground = True
     last_on_ground_ms = pg.time.get_ticks()
     jumps_remaining = MAX_JUMPS
+
+    _jump_base = JUMP_BASE
+    _jump_boost = JUMP_BOOST
+    _jump_boost_2 = JUMP_BOOST_2
+
+    # Add a variable to track player lives
+    player_lives = 3
+
+    # Add a cooldown timer for hit indication
+    hit_cooldown = 0
+
+    level_up_trigger = False
+
+    # Add a variable to track the number of consecutive obstacles passed
+    consecutive_obstacles = 0
+    player_scale = 1.0
 
     # World
     obstacles = []
@@ -174,18 +238,12 @@ def main():
                 pg.quit()
                 sys.exit()
             elif event.type == pg.KEYDOWN:
-                if event.key == pg.K_m: # check for mode toggle key
+                if event.key == pg.K_m:  # check for mode toggle key
                     USE_EMG = not USE_EMG
                     input_src = kb if not USE_EMG else SmoothedInput(real)
+                    start.play()
 
-        # --- Obstacle spawning ---
         now = pg.time.get_ticks()
-
-        if alive and now >= next_obstacle_ms:
-            obstacles.append(make_obstacle())
-
-            # choose a random time (in milliseconds) until the next spawn
-            next_obstacle_ms = now + random.randint(800, 1400)
 
         # Read inputs
         ratio = input_src.read()
@@ -211,7 +269,7 @@ def main():
         # --- Jump logic ---
 
         # --- Track rising edge of jump ---
-        if 'prev_jump' not in locals():
+        if "prev_jump" not in locals():
             prev_jump = False
         just_pressed_jump = request_jump and not prev_jump
         prev_jump = request_jump
@@ -220,29 +278,30 @@ def main():
         if just_pressed_jump:
             if jumps_remaining > 0:
                 if USE_EMG:
-                    impulse = JUMP_BASE + (JUMP_BOOST if jumps_remaining == 2 else JUMP_BOOST_2) * max(0.0, ratio)
+                    impulse = _jump_base + (
+                        _jump_boost if jumps_remaining == 2 else _jump_boost_2
+                    ) * max(0.0, ratio)
                 else:
-                    impulse = JUMP_BASE + 0.8*(JUMP_BOOST if jumps_remaining == 2 else JUMP_BOOST_2)
+                    impulse = _jump_base + 0.8 * (
+                        _jump_boost if jumps_remaining == 2 else _jump_boost_2
+                    )
 
-                # Optional: make second jump slightly weaker
-                if jumps_remaining == 1:
-                    impulse *= 0.85
                 vy = -impulse
                 on_ground = False
                 jumps_remaining -= 1
-                jump_sound.play()
+                cartoon_jump.play()
 
         # --- Ducking (only when grounded) ---
         if request_duck and on_ground and not ducking:
-            duck_sound.play()
+            hitting_sandbag.play()
         ducking = bool(request_duck and on_ground)
-        current_h = int(player_h * (DUCK_SCALE if ducking else 1.0))
+        current_h = int(player_h * player_scale * (DUCK_SCALE if ducking else 1.0))
         player.height = current_h
 
         # --- Physics integration ---
-        vy += GRAVITY           # gravity = acceleration
-        vy *= AIR_DRAG          # smooth drag
-        player_y += vy          # integrate position
+        vy += GRAVITY  # gravity = acceleration
+        vy *= AIR_DRAG  # smooth drag
+        player_y += vy  # integrate position
 
         # --- Clamp to ground ---
         if player_y > GROUND_Y:
@@ -265,6 +324,10 @@ def main():
         for ob in obstacles:
             ob.x -= int(SCROLL_SPEED)
 
+        # # Mark obstacles as hit to prevent multiple collisions
+        # for ob in obstacles:
+        #     ob.hit = False
+
         # Remove and score
         keep = []
         for ob in obstacles:
@@ -272,20 +335,60 @@ def main():
                 keep.append(ob)
             else:
                 score += 1
-                score_sound.play()
+                consecutive_obstacles += 1  # Increment consecutive obstacles passed
+                random.choice(score_sounds).play()
         obstacles = keep
 
+        # Check for level up condition
+        if consecutive_obstacles >= LEVEL_UP_THRESHOLD and not level_up_trigger:
+            level_up_trigger = True
+            # player_scale = 0.5
+            # player.height = int(player_h * player_scale)
+            # player.bottom = GROUND_Y
+            _jump_base = 16
+            _jump_boost = 5  # Increase jump height significantly
+            _jump_boost_2 = 4
+            levelup.play()  # Play level up sound
+
+        # Update hit cooldown timer
+        if hit_cooldown > 0:
+            hit_cooldown -= dt
+
         # --- Collisions ---
+        alive = player_lives > 0
+
         if alive:
             for ob in obstacles:
                 if player.colliderect(ob):
-                    hit_sound.play()
-                    alive = False
-                    death_time = pg.time.get_ticks()
-                    break
+                    if (
+                        player.bottom <= ob.top + 18
+                    ):  # Player lands on top of the obstacle
+                        player_y = ob.top
+                        vy = 0.0  # Reset vertical velocity
+                        on_ground = True
+                        jumps_remaining = MAX_JUMPS  # Reset jumps
+                    else:
+                        if ob.hit == False:
+                            ob.hit = True
+                            random.choice(hit_sounds).play()
+                            player_lives -= 1  # Decrement lives on collision
+                            hit_cooldown = 500  # Set cooldown to 500ms
+                            consecutive_obstacles = 0
+                            level_up_trigger = False
+                            # player.height = player_h
+                            # player.bottom = GROUND_Y
+                            _jump_base = JUMP_BASE
+                            _jump_boost = JUMP_BOOST
+                            _jump_boost_2 = JUMP_BOOST_2
+                            if player_lives <= 0:
+                                player.height = player_h 
+                                alive = False
+                                random.choice(fail_sounds).play()
+                                death_time = pg.time.get_ticks()
+                            break
         else:
             # Auto-restart after 1.5 seconds
-            if pg.time.get_ticks() - death_time > 1500:
+            if pg.time.get_ticks() - death_time > 2000:
                 # Reset world
                 obstacles = []
                 score = 0
@@ -293,41 +396,168 @@ def main():
                 player_y = GROUND_Y
                 vy = 0.0
                 on_ground = True
-                next_obstacle_ms = pg.time.get_ticks() + 1000
+                player_lives = 3
+                consecutive_obstacles = 0
+                level_up_trigger = False
+                next_obstacle_ms = pg.time.get_ticks() + 800
+                _jump_base = JUMP_BASE
+                _jump_boost = JUMP_BOOST
+                _jump_boost_2 = JUMP_BOOST_2
+                player_scale = 1.0
+                # player.height = player_h
+                # player.bottom = GROUND_Y
 
         # Draw
         screen.fill((20, 24, 32))
 
         # Ground
-        pg.draw.line(screen, (180,180,180), (0, GROUND_Y), (WIDTH, GROUND_Y), 2)
+        pg.draw.line(screen, (180, 180, 180), (0, GROUND_Y), (WIDTH, GROUND_Y), 2)
         # Frame number
-        draw_text(screen, f"Frame: {pg.time.get_ticks() // (1000 // FPS)}", 18, WIDTH - 150, 8, (200, 200, 200))
+        draw_text(
+            screen,
+            f"Frame: {pg.time.get_ticks() // (1000 // FPS)}",
+            18,
+            WIDTH - 150,
+            8,
+            (200, 200, 200),
+        )
 
         # Obstacles
         for ob in obstacles:
             pg.draw.rect(screen, (100, 200, 210), ob, border_radius=6)
 
         # Player
-        pg.draw.rect(screen, (255, 230, 90) if alive else (180,80,80), player, border_radius=6)
+        player_color =  []
+        if consecutive_obstacles >= LEVEL_UP_THRESHOLD:
+            player_color = (255, 20, 147)
+        elif alive and hit_cooldown <= 0:
+            player_color = (255, 230, 90)
+        else:
+            player_color = (180, 80, 80)
+
+        pg.draw.rect(
+            screen,
+            (player_color),
+            player,
+            border_radius=6,
+        )
 
         # HUD
         mode = "EMG" if USE_EMG else "Keyboard"
-        draw_text(screen, f"Mode: {mode}  Score: {score}", 20, 10, 8)
-        # draw_text(screen, f"Flex:{flex:.2f} Ext:{ext:.2f}  (M to toggle)", 18, 10, 32, (180,180,200))
-        if not alive:
-            draw_text(screen, "Game Over - press M to toggle input or close window", 18, 10, 40, (255,150,150))
-        if USE_EMG:
-            draw_text(
-                screen, f"Raw Ratio          :{input_src.src.ratio:.2f}", 18, 10, 65, (200, 200, 100)
-            )
-            draw_text(
-                screen, f"Smoothed Ratio:{ratio:.2f}", 18, 10, 85, (200, 200, 100)
-            )
+        draw_text(screen, f"Mode: {mode}", 20, 10, 8)
         draw_text(
-            screen, f"Jumps Left: {jumps_remaining}", 18, 10, 110, (200, 200, 200)
+            screen,
+            f"Score: {score}",
+            40,
+            600,
+            180,
+            (255, 255, 255),
+        )
+        if not alive:
+            draw_text(
+                screen,
+                "Game Over - press M to toggle input or close window",
+                35,
+                200,
+                250,
+                (255, 150, 150),
+            )
+        if USE_EMG:
+            # Draw horizontal bars for raw and smoothed ratios
+            bar_x = 190
+            bar_y = 105
+            bar_width = 160
+            bar_height = 20
+            max_bar_width = 200
+
+            lines_y_high = bar_y - 5
+            lines_y_low = bar_y + bar_height + 5
+
+            # Draw the zero line (horizontal, slightly extended above and below the bar)
+            zero_line_x = bar_x
+            pg.draw.line(
+                screen,
+                (255, 255, 255),
+                (zero_line_x, lines_y_high),
+                (zero_line_x, lines_y_low),
+                2,
+            )
+            # Draw the EMG_JUMP_DEADZONE line
+            jump_deadzone_y = int(EMG_JUMP_DEADZONE * bar_width)
+            pg.draw.line(
+                screen,
+                (150, 150, 150),
+                (zero_line_x + jump_deadzone_y, lines_y_high),
+                (zero_line_x + jump_deadzone_y, lines_y_low),
+                1,
+            )
+
+            # Draw the EMG_DUCK_THRESHOLD line
+            duck_threshold_y = int(EMG_DUCK_THRESHOLD * bar_width)  #
+            pg.draw.line(
+                screen,
+                (150, 150, 150),
+                (zero_line_x + duck_threshold_y, lines_y_high),
+                (zero_line_x + duck_threshold_y, lines_y_low),
+                1,
+            )
+            # Draw the smoothed ratio bar
+            bar_width_final = min(abs(int(ratio * bar_width)), max_bar_width)
+            smoothed_ratio_color = (200, 200, 100)
+            if ratio >= 0:
+                pg.draw.rect(
+                    screen,
+                    smoothed_ratio_color,
+                    (bar_x, bar_y, bar_width_final, bar_height),
+                )
+            else:
+                pg.draw.rect(
+                    screen,
+                    smoothed_ratio_color,
+                    (bar_x - bar_width_final, bar_y, bar_width_final, bar_height),
+                )
+
+            # Display the raw and smoothed ratio values
+            draw_text(
+                screen,
+                f"Raw Ratio            :{input_src.src.ratio:.2f}",
+                20,
+                10,
+                40,
+                (200, 200, 100),
+            )
+            draw_text(
+                screen, f"Smoothed Ratio: {ratio:.2f}", 20, 10, 65, (200, 200, 100)
+            )
+
+            # draw_text(screen, f"Jump Limit: {EMG_JUMP_DEADZONE:.2f}", 20, 250, 40, (200, 200, 100))
+            # draw_text(
+            #     screen,
+            #     f"Duck Limit: {EMG_DUCK_THRESHOLD:.2f}",
+            #     20,
+            #     250,
+            #     65,
+            #     (200, 200, 100),
+            # )
+
+        draw_text(
+            screen, f"Jumps Left: {jumps_remaining}", 20, 10, 130, (200, 200, 200)
+        )
+        # Display player lives on the screen
+        lives_color = (
+            (0, 255, 0)
+            if player_lives == 3
+            else (255, 255, 0) if player_lives == 2 else (255, 0, 0)
+        )
+        draw_text(screen, f"Lives: {player_lives}", 35, 600, 140, lives_color)
+
+        # Display streak counter on the screen
+        draw_text(
+            screen, f"Streak: {consecutive_obstacles}", 20, 10, 160, (200, 200, 200)
         )
 
         pg.display.flip()
+
 
 if __name__ == "__main__":
     main()

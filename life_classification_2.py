@@ -21,7 +21,7 @@ macAddress = "98:D3:11:FE:02:74"
 acqChannels_real = [2, 4]  #CH2 = flexor, CH4 = extensor
 acqChannels = [ch - 1 for ch in acqChannels_real]
 fs = 1000
-nSamples = 100
+nSamples = 50
 window_size = int(0.5 * fs)  # 0.5 s window
 update_period = 0.25  # classify every 0.25 s
 
@@ -46,7 +46,7 @@ print("Connected and acquisition started")
 app = QtWidgets.QApplication([])
 pg.setConfigOptions(antialias=True)
 win = pg.GraphicsLayoutWidget(show=True, title="BITalino Real-Time EMG Classification")
-win.resize(1200, 800)
+win.resize(1600, 1200)
 win.ci.layout.setColumnStretchFactor(0, 3)  # EMG plots (left column) → 3x wider
 win.ci.layout.setColumnStretchFactor(1, 1)  # Image column → narrower
 

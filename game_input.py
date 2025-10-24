@@ -12,8 +12,7 @@ EEG_FS = 1000
 EEG_VCC = 3.0
 EEG_GAIN = 41780.0
 THRESHOLD_UV_LOW = 35.0  # same as your reaction.py threshold
-N_SAMPLES = 15
-EMG_RATIO_OFFSET = 0.5
+N_SAMPLES = 20
 # =====================
 
 
@@ -55,6 +54,9 @@ class RealEMGInput(InputSource):
         self.n_samples = n_samples
         self.ratio = 1.0
         self._running = True
+        self.ext = 0.0
+        self.boost_ext = 12  # Factor to boost extensor stddev when above threshold
+        self.boost_ext_threshold = 1.00  # Threshold for extensor stddev to apply boost
 
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
@@ -72,8 +74,15 @@ class RealEMGInput(InputSource):
                 ext_mv = (ext / (2**16 - 1)) * 3.3
 
                 flex_std = np.std(flex_mv)
-                ext_std = np.std(ext_mv)
-                self.ratio = (flex_std + 1e-6) / (ext_std + 1e-6)
+                self.ext = np.std(ext_mv)
+                # print(f"🔍 flex_std: {flex_std:.4f} mV, ext_std: {self.ext:.4f} mV")
+
+                # Increase ext_std further if it is significantly large
+                if self.ext > self.boost_ext_threshold:
+                    self.ext *= self.boost_ext  # Scale factor can be adjusted
+                    # print(f"🔧 Boosted ext_std to {self.ext:.4f} mV")
+
+                self.ratio = (flex_std + 1e-6) / (self.ext + 1e-6)
 
             except Exception as e:
                 print("⚠️ EMG read error:", e)
@@ -81,6 +90,9 @@ class RealEMGInput(InputSource):
 
     def read(self) -> float:
         return self.ratio
+
+    def get_ext_std(self) -> float:
+        return self.ext
 
     def close(self):
         self._running = False
@@ -98,9 +110,9 @@ class SmoothedInput(InputSource):
     def __init__(
         self,
         source: InputSource,
-        alpha: float = 0.5,
+        alpha: float = 0.92,
         deadzone: float = 0.05,
-        offset: float = 0.5
+        offset: float = 0.0
     ):
         self.src = source
         self.alpha = float(alpha)
@@ -109,19 +121,19 @@ class SmoothedInput(InputSource):
         self.offset = float(offset)
 
     def read(self) -> float:
-        self.ratio = self.src.read()
+        ratio = self.src.read()
 
         # ratio = np.clip(ratio, 0.0, 4.0)
         # # normalize from 0 to 3 to 0 to 1
         # ratio = ratio / 4.0
-        self.ratio -= self.offset
+        ratio -= self.offset
 
         # # apply deadzone
         # if ratio < self.dead:
         #     ratio = 0.0
 
-        # # exponential smoothing
-        # self.ratio = self.alpha * ratio + (1 - self.alpha) * self.ratio
+        # exponential smoothing
+        self.ratio = self.alpha * ratio + (1 - self.alpha) * self.ratio
 
         # Debug (can disable for performance)
         # print(f"SmoothedInput: raw={ratio:.3f}, smoothed={self.ratio:.3f}")
