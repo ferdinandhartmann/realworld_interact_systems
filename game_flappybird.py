@@ -28,7 +28,7 @@ MODE = 2  # 0 = keyboard, 1 = EMG, 2 = EEG
 
 EMG_FLAP_THRESHOLD = 0.35
 
-EEG_THRESHOLD = 35.05
+EEG_THRESHOLD = 35
 MAX_VISIBLE_TIME = 3.0  # seconds
 
 #############################
@@ -63,10 +63,10 @@ levelup = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "levelup_trimmed.mp3"))
 start = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "start.mp3"))
 
 hitting_sandbag.set_volume(0.3)
-point_smooth_beep.set_volume(0.3)
+point_smooth_beep.set_volume(0.9)
 oha_ohh.set_volume(0.4)
 losing_horn.set_volume(0.8)
-cartoon_jump.set_volume(0.5)
+cartoon_jump.set_volume(0.6     )
 
 ############################## Plotting
 THRESHOLD = 35.3

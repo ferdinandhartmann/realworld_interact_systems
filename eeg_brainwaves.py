@@ -93,6 +93,8 @@ plot_alpha.setLabel("bottom", "Samples")
 plot_beta.setLabel("bottom", "Samples")
 plot_gamma.setLabel("bottom", "Samples")
 
+# Adjust the size of the plot window
+win.resize(1800, 1200)  # Set width to 1200 and height to 800
 
 win.show()
 
@@ -135,7 +137,7 @@ def update():
             # gamma_p = compute_band_power(gamma, fs, (30, 45))
 
             alpha_p, alpha = band_power_time_domain(window, 8, 13, fs)
-            beta_p,  beta  = band_power_time_domain(window, 13, 30, fs)
+            beta_p, beta = band_power_time_domain(window, 13, 30, fs)
             gamma_p, gamma = band_power_time_domain(window, 30, 45, fs)
             ratio = alpha_p / (beta_p + 1e-9)  # true physical ratio
 

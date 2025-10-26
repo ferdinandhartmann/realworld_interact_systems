@@ -185,6 +185,8 @@ def main():
     pg.display.set_caption("Runner EMG")
     clock = pg.time.Clock()
 
+    real = None
+    
     # Input
     kb = KeyboardInput(pg)
     if USE_EMG:
@@ -227,7 +229,7 @@ def main():
     # Add variables for squish effect
     squish_timer = 0
     SQUISH_DURATION = 110  # milliseconds
-    SQUISH_AMOUNT = 0.3 # percentage of squish
+    SQUISH_AMOUNT = 0.25 # percentage of squish
 
     # World
     obstacles = []
@@ -308,7 +310,7 @@ def main():
                         _jump_boost if jumps_remaining == 2 else _jump_boost_2
                     ) * max(0.0, ratio)
                 else:
-                    impulse = _jump_base + 0.8 * (
+                    impulse = _jump_base + 1.5 * (
                         _jump_boost if jumps_remaining == 2 else _jump_boost_2
                     )
 
@@ -505,7 +507,7 @@ def main():
                 screen,
                 "Game Over - press M to toggle input or close window",
                 35,
-                200,
+                230,
                 250,
                 (255, 150, 150),
             )
