@@ -1,8 +1,10 @@
 from typing import Tuple
 import numpy as np
-from bitalino import BITalino
+# from bitalino import BITalino
 from scipy.signal import butter, lfilter
 import time
+import threading, time
+from collections import deque
 
 
 # ====== CONFIG ======
@@ -35,13 +37,7 @@ class KeyboardInput(InputSource):
         return ratio
 
 
-import threading, time
-from collections import deque
-import numpy as np
-from bitalino import BITalino
-
-
-class RealEMGInput(InputSource):
+class EMGInput(InputSource):
     """Non-blocking EMG input using a background thread that outputs ratio."""
 
     def __init__(
@@ -60,7 +56,7 @@ class RealEMGInput(InputSource):
 
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
-        print(f"✅ Async RealEMGInput running on channels {channels} @ {fs} Hz")
+        print(f"✅ Async EMGInput running on channels {channels} @ {fs} Hz")
 
     def _reader(self):
         while self._running:

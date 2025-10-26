@@ -1,51 +1,64 @@
-# Create three Python game files with EMG/keyboard toggle input (pygame-based).
-
 import os, textwrap, json, pathlib
-
-# base = "/mnt/data"
-# os.makedirs(base, exist_ok=True)
-
-# emg_input_code = r'''
-# emg_input.py
-# Unified input layer for keyboard *or* EMG (flexor/extensor) signals.
-# You can plug in your real EMG stream by implementing `RealEMGInput.read()`.
-# '''
-
+from turtle import mode
 from typing import Tuple, Optional
-
-
-# flappy_code = r'''
-# flappy_emg.py
-# Flappy Bird using pygame with dual control:
-# - Keyboard: SPACE/UP to flap
-# - EMG: flexor activation > threshold to flap
-#
-# Toggle control mode at runtime with "M". Shows current mode on screen.
-# '''
-
 import math, random, sys
 import pygame as pg
-from game_input import KeyboardInput, RealEMGInput, SmoothedInput, EEGBlinkInput
+from game_input import KeyboardInput, EMGInput, SmoothedInput, EEGBlinkInput
 
-WIDTH, HEIGHT = 400, 600
-FPS = 60
+WIDTH, HEIGHT = 800, 1200
+FPS = 100
 
-BIRD_X = 80
+BIRD_X = 160
 GRAVITY = 0.35
-FLAP_VEL = -6.5
-PIPE_GAP = 150
+FLAP_VEL = -12.0
+PIPE_GAP = 450
 PIPE_SPEED = 3.0
 SPAWN_EVERY = 1500  # ms
 
 FONT_NAME = "arial"
 
-USE_EMG = False  # default: keyboard. Press "M" to toggle at runtime.
+MODE = 0  # 0 = keyboard, 1 = EMG, 2 = EEG
+
 EMG_FLAP_THRESHOLD = 0.35
 
+pg.mixer.init(frequency=44100, size=-16, channels=1)
+# Load your sound effects
+SOUNDS_DIR = "game_sounds"
+
+brass_fail_drops = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "brass_fail_drops.mp3"))
+game_over = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "game_over.mp3"))
+losing_horn = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "losing_horn.mp3"))
+fail_sounds = [brass_fail_drops, game_over, losing_horn]
+
+fall_down_whistle = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "fall_down_whistle.mp3"))
+
+cartoon_jump = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "cartoon_jump.mp3"))
+# cartoon_jump = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "point_lower.mp3"))
+
+hitting_sandbag = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "hitting_sandbag.mp3"))
+
+oha_ohh = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "oha_ohh.mp3"))
+uh = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "uh.mp3"))
+hit_sounds = [uh]
+
+get_coin = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "get_coin.mp3"))
+get_coin_low = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "get_coin_low.mp3"))
+point_smooth_beep = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "point_smooth_beep.mp3"))
+score_sounds = [point_smooth_beep]
+
+levelup = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "levelup_trimmed.mp3"))
+start = pg.mixer.Sound(os.path.join(SOUNDS_DIR, "start.mp3"))
+
+hitting_sandbag.set_volume(0.3)
+point_smooth_beep.set_volume(0.3)
+oha_ohh.set_volume(0.4)
+losing_horn.set_volume(0.8)
+cartoon_jump.set_volume(0.5)
+
 def make_pipes():
-    gap_y = random.randint(120, HEIGHT-120)
-    top = pg.Rect(WIDTH, 0, 60, gap_y - PIPE_GAP//2)
-    bottom = pg.Rect(WIDTH, gap_y + PIPE_GAP//2, 60, HEIGHT - (gap_y + PIPE_GAP//2))
+    gap_y = random.randint(240, HEIGHT - 240)
+    top = pg.Rect(WIDTH, 0, 120, gap_y - PIPE_GAP // 2)
+    bottom = pg.Rect(WIDTH, gap_y + PIPE_GAP // 2, 120, HEIGHT - (gap_y + PIPE_GAP // 2))
     return top, bottom
 
 def collide(bird_rect, pipes):
@@ -64,22 +77,23 @@ def draw_text(surf, text, size, x, y, color=(255,255,255)):
     surf.blit(img, rect)
 
 def main():
-    global USE_EMG
+    global MODE
     pg.init()
     screen = pg.display.set_mode((WIDTH, HEIGHT))
     pg.display.set_caption("Flappy EMG")
     clock = pg.time.Clock()
 
     # Input sources
-    kb = KeyboardInput(pg)
-    real = RealEMGInput()
-    eeg = EEGBlinkInput()
+    if MODE == 0:
+        kb = KeyboardInput(pg)
+    if MODE == 1:
+        emg = EMGInput()
+    if MODE == 2:
+        eeg = EEGBlinkInput()
 
-    mode = 2  # 0 = keyboard, 1 = EMG, 2 = EEG
-    sources = [kb, real, eeg]
-    input_src = SmoothedInput(sources[mode], alpha=0.3, deadzone=0.05)
+    input_src = kb if MODE == 0 else SmoothedInput(emg) if MODE == 1 else SmoothedInput(eeg)
 
-    bird = pg.Rect(BIRD_X, HEIGHT//2, 28, 20)
+    bird = pg.Rect(BIRD_X, HEIGHT // 2, 56, 40)
     vel_y = 0.0
 
     pipes = []
@@ -88,6 +102,8 @@ def main():
     started = False
     running = True
 
+    play_start_timer = 100 
+
     while running:
         dt = clock.tick(FPS)
         for event in pg.event.get():
@@ -95,17 +111,30 @@ def main():
                 running = False
             elif event.type == pg.KEYDOWN:
                 if event.key == pg.K_m:
-                    mode = (mode + 1) % 3
-                    input_src = SmoothedInput(sources[mode], alpha=0.3, deadzone=0.05)
-                if mode == 0 and (event.key in (pg.K_SPACE, pg.K_UP)):
+                    MODE = (MODE + 1) % 3
+                    input_src = kb if MODE == 0 else SmoothedInput(emg) if MODE == 1 else SmoothedInput(eeg)
+
+
+                if MODE == 0 and (event.key in (pg.K_SPACE, pg.K_UP)):
                     vel_y = FLAP_VEL
+                    cartoon_jump.play()
                     started = True
 
-        # Read input
-        flex, ext = input_src.read()
-        if mode == 1 and flex > EMG_FLAP_THRESHOLD:
-            vel_y = FLAP_VEL
-            started = True
+
+        if play_start_timer >= 1:
+            play_start_timer += dt
+            if play_start_timer >= 400:
+                play_start_timer = 0
+                start.play()
+
+
+        # Read input        
+        if MODE == 1:
+            flex, ext = input_src.read()
+            if flex > EMG_FLAP_THRESHOLD:
+                vel_y = FLAP_VEL
+                cartoon_jump.play()
+                started = True
 
         if started:
             vel_y += GRAVITY
@@ -120,15 +149,11 @@ def main():
         for p in pipes:
             p.x -= int(PIPE_SPEED)
 
-        # Score: when a pipe pair passes bird
-        # Pair handling: pipes list is [top, bottom, top, bottom, ...], count only top pipes
-        for i in range(0, len(pipes), 2):
-            if pipes[i].right == BIRD_X:  # rare exact, so do a range check
-                score += 1
-        # Better: when pipe just crosses bird_x
+        # Score: when pipe just crosses bird_x
         for i in range(0, len(pipes), 2):
             if pipes[i].right < BIRD_X <= pipes[i].right + PIPE_SPEED:
                 score += 1
+                point_smooth_beep.play()
 
         # Remove off-screen pipes
         pipes = [p for p in pipes if p.right > 0]
@@ -136,12 +161,14 @@ def main():
         # Collisions
         if collide(bird, pipes):
             # Reset
-            bird = pg.Rect(BIRD_X, HEIGHT//2, 28, 20)
+            uh.play()
+            bird = pg.Rect(BIRD_X, HEIGHT // 2, 56, 40)
             vel_y = 0.0
             pipes = []
             score = 0
             started = False
             spawn_timer = pg.time.get_ticks()
+            play_start_timer = 1
 
         # Draw
         screen.fill((25, 25, 35))
@@ -152,15 +179,15 @@ def main():
             pg.draw.rect(screen, color, p)
 
         # Bird
-        pg.draw.rect(screen, (255, 220, 0), bird, border_radius=6)
+        pg.draw.rect(screen, (255, 220, 0), bird, border_radius=12)
 
         # HUD
         mode_names = ["Keyboard", "EMG", "EEG Blink"]
-        draw_text(screen, f"Mode: {mode_names[mode]}  Score: {score}", 20, WIDTH//2, 10)
-        draw_text(screen, f"Flex:{flex:.2f} Ext:{ext:.2f}  (M to toggle)", 18, WIDTH//2, 36, (180,180,200))
-
+        draw_text(screen, f"Mode: {mode_names[MODE]}  Score: {score}", 40, WIDTH // 2, 20)
+        if MODE == 1:
+            draw_text(screen, f"Flex:{flex:.2f} Ext:{ext:.2f}  (M to toggle)", 36, WIDTH // 2, 72, (180, 180, 200))
+    
         pg.display.flip()
-
     pg.quit()
     sys.exit()
 

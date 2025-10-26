@@ -6,13 +6,13 @@
 
 import math, random, sys
 import pygame as pg
-from game_input import KeyboardInput, RealEMGInput, SmoothedInput
+from game_input import KeyboardInput, EMGInput, SmoothedInput
 import numpy as np
 import pygame as pg
 import os
 
 WIDTH, HEIGHT = 1400, 750
-FPS = 100
+FPS = 120
 
 GROUND_Y = 600
 SCROLL_SPEED = 6.0
@@ -20,7 +20,7 @@ SCROLL_SPEED = 6.0
 JUMP_BASE = 11  # base jump impulse
 JUMP_BOOST = 3.85  # scaled by flex [0..1]
 JUMP_BOOST_2 = 1.5  # scaled by flex [0..1]
-GRAVITY = 0.8
+GRAVITY = 0.7
 AIR_DRAG = 0.99  # mild air damping
 DUCK_SCALE = 0.5
 EMG_JUMP_DEADZONE = 0.5
@@ -30,11 +30,11 @@ OBSTACLE_EVERY = (650, 1300)  # ms range
 player_w, player_h = 34, 60
 MAX_JUMPS = 2
 
-LEVEL_UP_THRESHOLD = 8
+LEVEL_UP_THRESHOLD = 10
 
 FONT_NAME = "arial"
 
-USE_EMG = True  # default: keyboard. Press "M" to toggle at runtime.
+USE_EMG = False
 
 
 pg.mixer.init(frequency=44100, size=-16, channels=1)
@@ -166,7 +166,7 @@ def calibrate_emg(screen, real_emg, duration=2.0):
 
 
 def main():
-    global USE_EMG, _jump_base, _jump_boost, _jump_boost_2
+    global USE_EMG, _jump_base, _jump_boost, _jump_boost_2, SCROLL_SPEED, OBSTACLE_EVERY
     pg.init()
     screen = pg.display.set_mode((WIDTH, HEIGHT))
 
@@ -187,7 +187,8 @@ def main():
 
     # Input
     kb = KeyboardInput(pg)
-    real = RealEMGInput()
+    if USE_EMG:
+        real = EMGInput()
     input_src = kb if not USE_EMG else SmoothedInput(real)
 
     # --- Calibration phase ---
@@ -223,6 +224,11 @@ def main():
     consecutive_obstacles = 0
     player_scale = 1.0
 
+    # Add variables for squish effect
+    squish_timer = 0
+    SQUISH_DURATION = 110  # milliseconds
+    SQUISH_AMOUNT = 0.3 # percentage of squish
+
     # World
     obstacles = []
     # next_obstacle_ms = pg.time.get_ticks() + random.randint(*OBSTACLE_EVERY)
@@ -230,6 +236,11 @@ def main():
     now = pg.time.get_ticks()
     score = 0
     alive = True
+
+    start.play()
+
+    play_faster_levelup_1 = True
+    play_faster_levelup_2 = True
 
     while True:
         dt = clock.tick(FPS)
@@ -244,6 +255,19 @@ def main():
                     start.play()
 
         now = pg.time.get_ticks()
+
+        if score > 20 and alive:
+            SCROLL_SPEED = 7.5
+            OBSTACLE_EVERY = (500, 1000)
+            if play_faster_levelup_1:
+                levelup.play()
+                play_faster_levelup_1 = False
+        if score > 30 and alive:
+            SCROLL_SPEED = 8.0
+            OBSTACLE_EVERY = (400, 800)
+            if play_faster_levelup_2:
+                levelup.play()
+                play_faster_levelup_2 = False
 
         # Read inputs
         ratio = input_src.read()
@@ -277,6 +301,8 @@ def main():
         # --- Jump logic (with double jump) ---
         if just_pressed_jump:
             if jumps_remaining > 0:
+                # Trigger squish effect on jump
+                # squish_timer = SQUISH_DURATION
                 if USE_EMG:
                     impulse = _jump_base + (
                         _jump_boost if jumps_remaining == 2 else _jump_boost_2
@@ -306,6 +332,8 @@ def main():
         # --- Clamp to ground ---
         if player_y > GROUND_Y:
             player_y = GROUND_Y
+            if not on_ground:  # Trigger squish effect on landing
+                squish_timer = SQUISH_DURATION
             vy = 0.0
             on_ground = True
 
@@ -333,7 +361,7 @@ def main():
         for ob in obstacles:
             if ob.right > 0:
                 keep.append(ob)
-            else:
+            elif ob.left < player.left and not ob.hit:
                 score += 1
                 consecutive_obstacles += 1  # Increment consecutive obstacles passed
                 random.choice(score_sounds).play()
@@ -361,12 +389,15 @@ def main():
             for ob in obstacles:
                 if player.colliderect(ob):
                     if (
-                        player.bottom <= ob.top + 18
-                    ):  # Player lands on top of the obstacle
-                        player_y = ob.top
-                        vy = 0.0  # Reset vertical velocity
-                        on_ground = True
-                        jumps_remaining = MAX_JUMPS  # Reset jumps
+                        player.bottom <= ob.top + 15
+                    ): # Player lands on top of the obstacle
+                        if vy > 0:
+                            player_y = ob.top
+                            vy = 0.0  # Reset vertical velocity
+                            if not on_ground:
+                                squish_timer = SQUISH_DURATION
+                            on_ground = True
+                            jumps_remaining = MAX_JUMPS  # Reset jumps
                     else:
                         if ob.hit == False:
                             ob.hit = True
@@ -404,6 +435,7 @@ def main():
                 _jump_boost = JUMP_BOOST
                 _jump_boost_2 = JUMP_BOOST_2
                 player_scale = 1.0
+                start.play()
                 # player.height = player_h
                 # player.bottom = GROUND_Y
 
@@ -425,6 +457,21 @@ def main():
         # Obstacles
         for ob in obstacles:
             pg.draw.rect(screen, (100, 200, 210), ob, border_radius=6)
+
+
+
+
+        if squish_timer > 0 and not request_duck:
+            squish_factor = 1 - SQUISH_AMOUNT * (1 - math.cos(math.pi * (SQUISH_DURATION - squish_timer) / SQUISH_DURATION)) / 2
+            squish_timer -= dt
+            squished_height_pos = int(player_h * (1 - squish_factor))
+            squished_height = int(player_h * squish_factor)
+            player.bottom += squished_height_pos
+            player.height = squished_height
+        else:
+            squish_factor = 1.0
+            # player.height = player_h
+
 
         # Player
         player_color =  []
