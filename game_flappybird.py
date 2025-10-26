@@ -9,15 +9,15 @@ WIDTH, HEIGHT = 800, 1200
 FPS = 100
 
 BIRD_X = 160
-GRAVITY = 0.35
-FLAP_VEL = -12.0
+GRAVITY = 0.18
+FLAP_VEL = -7.0
 PIPE_GAP = 450
 PIPE_SPEED = 3.0
 SPAWN_EVERY = 1500  # ms
 
 FONT_NAME = "arial"
 
-MODE = 0  # 0 = keyboard, 1 = EMG, 2 = EEG
+MODE = 2  # 0 = keyboard, 1 = EMG, 2 = EEG
 
 EMG_FLAP_THRESHOLD = 0.35
 
@@ -80,7 +80,22 @@ def main():
     global MODE
     pg.init()
     screen = pg.display.set_mode((WIDTH, HEIGHT))
-    pg.display.set_caption("Flappy EMG")
+
+    # --- Show connecting screen ---
+    font = pg.font.SysFont(FONT_NAME, 33, bold=False)
+    # font2 = pg.font.SysFont(FONT_NAME, 25, bold=False)
+    screen.fill((20, 24, 32))
+    text = font.render("Connecting to BITalino Device...", True, (255, 255, 180))
+    rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40))
+    # text2 = font2.render(
+    #     "Please move your arm into the resting position ...", True, (255, 255, 180)
+    # )
+    # rect2 = text.get_rect(center=(WIDTH // 2 - 30, HEIGHT // 2 + 80))
+    screen.blit(text, rect)
+    # screen.blit(text2, rect2)
+    pg.display.flip()
+
+    pg.display.set_caption("Flappy Bird")
     clock = pg.time.Clock()
 
     # Input sources
@@ -91,8 +106,9 @@ def main():
     if MODE == 2:
         eeg = EEGBlinkInput()
 
-    input_src = kb if MODE == 0 else SmoothedInput(emg) if MODE == 1 else SmoothedInput(eeg)
-
+    input_src = (
+        kb if MODE == 0 else SmoothedInput(emg) if MODE == 1 else eeg
+    )
     bird = pg.Rect(BIRD_X, HEIGHT // 2, 56, 40)
     vel_y = 0.0
 
@@ -112,14 +128,14 @@ def main():
             elif event.type == pg.KEYDOWN:
                 if event.key == pg.K_m:
                     MODE = (MODE + 1) % 3
-                    input_src = kb if MODE == 0 else SmoothedInput(emg) if MODE == 1 else SmoothedInput(eeg)
-
+                    input_src = (
+                        kb if MODE == 0 else (SmoothedInput(emg) if MODE == 1 else eeg)
+                    )
 
                 if MODE == 0 and (event.key in (pg.K_SPACE, pg.K_UP)):
                     vel_y = FLAP_VEL
                     cartoon_jump.play()
                     started = True
-
 
         if play_start_timer >= 1:
             play_start_timer += dt
@@ -127,11 +143,17 @@ def main():
                 play_start_timer = 0
                 start.play()
 
-
-        # Read input        
+        # Read input
         if MODE == 1:
             flex, ext = input_src.read()
             if flex > EMG_FLAP_THRESHOLD:
+                vel_y = FLAP_VEL
+                cartoon_jump.play()
+                started = True
+
+        if MODE == 2:
+            blink = eeg.read()
+            if blink > 0.0:
                 vel_y = FLAP_VEL
                 cartoon_jump.play()
                 started = True
@@ -172,7 +194,7 @@ def main():
 
         # Draw
         screen.fill((25, 25, 35))
-        
+
         # Pipes
         for idx, p in enumerate(pipes):
             color = (50, 200, 90) if idx % 2 == 0 else (50, 200, 90)
@@ -186,7 +208,7 @@ def main():
         draw_text(screen, f"Mode: {mode_names[MODE]}  Score: {score}", 40, WIDTH // 2, 20)
         if MODE == 1:
             draw_text(screen, f"Flex:{flex:.2f} Ext:{ext:.2f}  (M to toggle)", 36, WIDTH // 2, 72, (180, 180, 200))
-    
+
         pg.display.flip()
     pg.quit()
     sys.exit()

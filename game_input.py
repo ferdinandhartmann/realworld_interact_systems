@@ -1,6 +1,6 @@
 from typing import Tuple
 import numpy as np
-# from bitalino import BITalino
+from bitalino import BITalino
 from scipy.signal import butter, lfilter
 import time
 import threading, time
@@ -13,8 +13,8 @@ EEG_CHANNEL = 0
 EEG_FS = 1000
 EEG_VCC = 3.0
 EEG_GAIN = 41780.0
-THRESHOLD_UV_LOW = 35.0  # same as your reaction.py threshold
-N_SAMPLES = 20
+THRESHOLD_UV_LOW = 35.3  # same as your reaction.py threshold
+N_SAMPLES = 50
 # =====================
 
 
@@ -116,6 +116,7 @@ class SmoothedInput(InputSource):
         self.ratio = 0.0
         self.offset = float(offset)
 
+
     def read(self) -> float:
         ratio = self.src.read()
 
@@ -150,8 +151,14 @@ class EEGBlinkInput(InputSource):
         self.buffer = np.zeros(0)
         self.threshold = threshold_uv  # µV threshold, same as reaction.py
         self.last_blink_time = 0.0
-        self.min_blink_interval = 0.1  # seconds to ignore double detections
-        print(f"✅ EEGBlinkInput initialized on channel {channel} @ {EEG_FS} Hz")
+        self.min_blink_interval = 0.05  # seconds to ignore double detections
+        self.blink_detected = 0.0
+        self._running = True
+        self.downsample_blink_detection = 0
+
+        self.thread = threading.Thread(target=self._reader, daemon=True)
+        self.thread.start()
+        print(f"✅ Async EEGInput running on channels {self.channel} @ {EEG_FS} Hz")
 
     # --- conversion helpers ---
     def adc_to_microvolt(self, adc):
@@ -165,35 +172,44 @@ class EEGBlinkInput(InputSource):
         return lfilter(b, a, data)
 
     # --- main read ---
+    def _reader(self) -> float:
+        while self._running:
+            try:
+                samples = self.dev.read(N_SAMPLES)
+                raw = samples[:, 5 + self.channel].astype(float)
+                microvolt = self.adc_to_microvolt(raw)
+                microvolt = abs(microvolt)
+
+                # preprocess
+                # filt = self.bandpass_filter(microvolt)
+                max_amplitude = np.max(microvolt)
+                # print(f"🔍 EEG max_amplitude: {max_amplitude:.1f} µV")
+                # --- blink detection logic ---
+                self.blink_detected = 0.0
+                self.downsample_blink_detection += 1
+                if self.downsample_blink_detection > 0:
+                    if np.max(microvolt) < THRESHOLD_UV_LOW:
+                        print(f"⚡ Blink detected, max uv: {np.max(microvolt)}")
+                        self.downsample_blink_detection = 0
+                        self.blink_detected = 1.0
+
+                # now = time.time()
+                # if (
+                #     max_amplitude < self.threshold
+                #     and (now - self.last_blink_time) > self.min_blink_interval
+                # ):
+                # self.last_blink_time = now
+
+            except Exception as e:
+                print(f"⚠️ Error reading BITalino: {e}")
+                return 0.0
+
     def read(self) -> float:
-        try:
-            samples = self.dev.read(N_SAMPLES)
-            raw = samples[:, 5 + self.channel].astype(float)
-            microvolt = self.adc_to_microvolt(raw)
-            microvolt = abs(microvolt)
-
-                    # preprocess
-            # filt = self.bandpass_filter(microvolt)
-            amplitude = np.max(microvolt)
-            # --- blink detection logic ---
-            blink_detected = 0.0
-            now = time.time()
-            if (
-                amplitude < self.threshold
-                and (now - self.last_blink_time) > self.min_blink_interval
-            ):
-                blink_detected = 1.0
-                self.last_blink_time = now
-                print(f"⚡ EEG Blink detected — peak {amplitude:.1f} µV")
-
-            return blink_detected
-
-        except Exception as e:
-            print(f"⚠️ Error reading BITalino: {e}")
-            return 0.0
+        return self.blink_detected
 
     # --- clean shutdown ---
     def close(self):
+        self._running = False
         try:
             self.dev.stop()
             self.dev.close()

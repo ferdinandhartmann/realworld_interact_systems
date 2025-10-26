@@ -9,8 +9,8 @@ from PyQt5.QtGui import QPainter, QBrush, QColor, QPen
 MAC_ADDRESS = "98:D3:11:FE:02:74"
 CHANNEL = 0
 SAMPLING_RATE = 1000
-N_SAMPLES = 15
-THRESHOLD_UV_LOW = 35.0
+N_SAMPLES = 50
+THRESHOLD_UV_LOW = 35.3
 VCC = 3.0
 GAIN = 41780.0
 Y_RANGE_MAX = 36.5  # µV
@@ -142,9 +142,10 @@ def update():
     plot.setXRange(max(0, t[-1] - MAX_VISIBLE_TIME), t[-1])
 
     counter_random_blink += 1
-    if counter_random_blink > 20:
+    # print(microvolt)
+    if counter_random_blink > 0:
         if np.max(microvolt) < THRESHOLD_UV_LOW:
-            print(f"⚡ Blink detected")
+            print(f"⚡ Blink detected, max uv: {np.max(microvolt)}")
             counter_random_blink = 0
 
     # --- Move cue lines with time window ---
