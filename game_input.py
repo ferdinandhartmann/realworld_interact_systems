@@ -13,8 +13,9 @@ EEG_CHANNEL = 0
 EEG_FS = 1000
 EEG_VCC = 3.0
 EEG_GAIN = 41780.0
-THRESHOLD_UV_LOW = 35.3  # same as your reaction.py threshold
+THRESHOLD_UV_LOW = 35.05  
 N_SAMPLES = 50
+EEG_PLOT_LENGTH = 3 * EEG_FS
 # =====================
 
 
@@ -149,12 +150,15 @@ class EEGBlinkInput(InputSource):
         self.dev.start(EEG_FS, [channel])
         self.channel = channel
         self.buffer = np.zeros(0)
+        self.live_plot_buffer = np.zeros(0)  # For visualization
+        self.buffer_lock = threading.Lock()
         self.threshold = threshold_uv  # µV threshold, same as reaction.py
         self.last_blink_time = 0.0
         self.min_blink_interval = 0.05  # seconds to ignore double detections
         self.blink_detected = 0.0
         self._running = True
         self.downsample_blink_detection = 0
+        self.total_samples = 0
 
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
@@ -179,17 +183,26 @@ class EEGBlinkInput(InputSource):
                 raw = samples[:, 5 + self.channel].astype(float)
                 microvolt = self.adc_to_microvolt(raw)
                 microvolt = abs(microvolt)
+                num_new = len(microvolt)
+                self.total_samples += num_new
+                with self.buffer_lock:
+                    self.live_plot_buffer = np.concatenate([self.live_plot_buffer, microvolt])
+                    size = self.live_plot_buffer.size
+                    # print(f"Live plot buffer size: {size}")
+                    if self.live_plot_buffer.size > EEG_PLOT_LENGTH:
+                        self.live_plot_buffer = self.live_plot_buffer[-EEG_PLOT_LENGTH:]
 
                 # preprocess
                 # filt = self.bandpass_filter(microvolt)
-                max_amplitude = np.max(microvolt)
+                max_amplitude = np.min(microvolt)
+                # print(f"🔍 EEG max_amplitude: {max_amplitude:.1f} µV")
                 # print(f"🔍 EEG max_amplitude: {max_amplitude:.1f} µV")
                 # --- blink detection logic ---
                 self.blink_detected = 0.0
                 self.downsample_blink_detection += 1
                 if self.downsample_blink_detection > 0:
-                    if np.max(microvolt) < THRESHOLD_UV_LOW:
-                        print(f"⚡ Blink detected, max uv: {np.max(microvolt)}")
+                    if np.min(microvolt) < THRESHOLD_UV_LOW:
+                        print(f"⚡ Blink detected, min uv: {np.min(microvolt)}")
                         self.downsample_blink_detection = 0
                         self.blink_detected = 1.0
 

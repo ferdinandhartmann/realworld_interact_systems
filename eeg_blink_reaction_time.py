@@ -10,7 +10,7 @@ MAC_ADDRESS = "98:D3:11:FE:02:74"
 CHANNEL = 0
 SAMPLING_RATE = 1000
 N_SAMPLES = 50
-THRESHOLD_UV_LOW = 35.3
+THRESHOLD_UV_LOW = 35
 VCC = 3.0
 GAIN = 41780.0
 Y_RANGE_MAX = 36.5  # µV
@@ -144,8 +144,8 @@ def update():
     counter_random_blink += 1
     # print(microvolt)
     if counter_random_blink > 0:
-        if np.max(microvolt) < THRESHOLD_UV_LOW:
-            print(f"⚡ Blink detected, max uv: {np.max(microvolt)}")
+        if np.min(microvolt) < THRESHOLD_UV_LOW:
+            print(f"⚡ Blink detected, min uv: {np.min(microvolt)}")
             counter_random_blink = 0
 
     # --- Move cue lines with time window ---
@@ -177,7 +177,7 @@ def update():
 
     # --- Detect blink ---
     if cue_shown and not reaction_recorded:
-        if np.max(microvolt) < THRESHOLD_UV_LOW:
+        if np.min(microvolt) < THRESHOLD_UV_LOW:
             rt = (time.time() - cue_time) * 1000
             print(f"⚡ Blink detected after {rt:.1f} ms")
             reaction_recorded = True

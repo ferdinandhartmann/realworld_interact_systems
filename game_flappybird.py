@@ -4,6 +4,12 @@ from typing import Tuple, Optional
 import math, random, sys
 import pygame as pg
 from game_input import KeyboardInput, EMGInput, SmoothedInput, EEGBlinkInput
+import threading
+import numpy as np
+from pyqtgraph.Qt import QtCore, QtWidgets
+import pyqtgraph as pygraph
+import threading
+
 
 WIDTH, HEIGHT = 800, 1200
 FPS = 100
@@ -14,6 +20,7 @@ FLAP_VEL = -7.0
 PIPE_GAP = 450
 PIPE_SPEED = 3.0
 SPAWN_EVERY = 1500  # ms
+EEG_FS = 1000
 
 FONT_NAME = "arial"
 
@@ -21,6 +28,12 @@ MODE = 2  # 0 = keyboard, 1 = EMG, 2 = EEG
 
 EMG_FLAP_THRESHOLD = 0.35
 
+EEG_THRESHOLD = 35.05
+MAX_VISIBLE_TIME = 3.0  # seconds
+
+#############################
+#           SOUNDS
+############################
 pg.mixer.init(frequency=44100, size=-16, channels=1)
 # Load your sound effects
 SOUNDS_DIR = "game_sounds"
@@ -55,6 +68,32 @@ oha_ohh.set_volume(0.4)
 losing_horn.set_volume(0.8)
 cartoon_jump.set_volume(0.5)
 
+############################## Plotting
+THRESHOLD = 35.3
+
+# --- PyQtGraph setup for live signal ---
+app = QtWidgets.QApplication([])
+plot_win = pygraph.GraphicsLayoutWidget(show=True, title="Live Signal Monitor")
+plot = plot_win.addPlot(title="Signal (µV)")
+plot.setYRange(30, 40)
+plot.showGrid(x=True, y=True)
+curve = plot.plot(pen="y")
+threshold_line = pygraph.InfiniteLine(
+    pos=THRESHOLD, angle=0, pen=pygraph.mkPen("r", width=2, style=QtCore.Qt.DashLine)
+)
+plot.addItem(threshold_line)
+
+signal_buffer = np.zeros(300)
+plot_lock = threading.Lock()
+
+def update_plot(new_value):
+    global signal_buffer
+    with plot_lock:
+        signal_buffer = np.roll(signal_buffer, -1)
+        signal_buffer[-1] = new_value
+        curve.setData(signal_buffer)
+
+
 def make_pipes():
     gap_y = random.randint(240, HEIGHT - 240)
     top = pg.Rect(WIDTH, 0, 120, gap_y - PIPE_GAP // 2)
@@ -76,24 +115,25 @@ def draw_text(surf, text, size, x, y, color=(255,255,255)):
     rect.midtop = (x,y)
     surf.blit(img, rect)
 
-def main():
-    global MODE
-    pg.init()
-    screen = pg.display.set_mode((WIDTH, HEIGHT))
 
-    # --- Show connecting screen ---
-    font = pg.font.SysFont(FONT_NAME, 33, bold=False)
-    # font2 = pg.font.SysFont(FONT_NAME, 25, bold=False)
-    screen.fill((20, 24, 32))
-    text = font.render("Connecting to BITalino Device...", True, (255, 255, 180))
-    rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40))
-    # text2 = font2.render(
-    #     "Please move your arm into the resting position ...", True, (255, 255, 180)
-    # )
-    # rect2 = text.get_rect(center=(WIDTH // 2 - 30, HEIGHT // 2 + 80))
-    screen.blit(text, rect)
-    # screen.blit(text2, rect2)
-    pg.display.flip()
+def main(eeg_input=None, screen=None):
+    global MODE
+    # pg.init()
+    # screen = pg.display.set_mode((WIDTH, HEIGHT))
+
+    # # --- Show connecting screen ---
+    # font = pg.font.SysFont(FONT_NAME, 33, bold=False)
+    # # font2 = pg.font.SysFont(FONT_NAME, 25, bold=False)
+    # screen.fill((20, 24, 32))
+    # text = font.render("Connecting to BITalino Device...", True, (255, 255, 180))
+    # rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40))
+    # # text2 = font2.render(
+    # #     "Please move your arm into the resting position ...", True, (255, 255, 180)
+    # # )
+    # # rect2 = text.get_rect(center=(WIDTH // 2 - 30, HEIGHT // 2 + 80))
+    # screen.blit(text, rect)
+    # # screen.blit(text2, rect2)
+    # pg.display.flip()
 
     pg.display.set_caption("Flappy Bird")
     clock = pg.time.Clock()
@@ -104,7 +144,7 @@ def main():
     if MODE == 1:
         emg = EMGInput()
     if MODE == 2:
-        eeg = EEGBlinkInput()
+        eeg = EEGBlinkInput() if eeg_input is None else eeg_input
 
     input_src = (
         kb if MODE == 0 else SmoothedInput(emg) if MODE == 1 else eeg
@@ -157,6 +197,7 @@ def main():
                 vel_y = FLAP_VEL
                 cartoon_jump.play()
                 started = True
+            update_plot()  # adjust scaling
 
         if started:
             vel_y += GRAVITY
@@ -213,5 +254,79 @@ def main():
     pg.quit()
     sys.exit()
 
+
 if __name__ == "__main__":
-    main()
+
+    # --- Create EEG plot window ---
+    app = pygraph.mkQApp("EEG Plot")
+    plot_win = pygraph.GraphicsLayoutWidget(show=True, title="EEG Live Data (µV)")
+    plot_win.setGeometry(0, 500, 1000, 600)  # position next to game window
+    plot = plot_win.addPlot(title="EEG Signal")
+    plot.showGrid(x=True, y=True)
+    plot.setYRange(34.5, 36)
+    curve = plot.plot(pen="y")
+    thresh_line = pygraph.InfiniteLine(
+        pos=EEG_THRESHOLD,
+        angle=0,
+        pen=pygraph.mkPen("r", width=2, style=QtCore.Qt.DashLine),
+    )
+    plot.addItem(thresh_line)
+
+    eeg_ref = None  # global reference to EEG reader
+
+    # --- Run pygame + EEG in a thread ---
+    def run_game():
+        global eeg_ref
+        os.environ["SDL_VIDEO_WINDOW_POS"] = "1000,200"
+        pg.init()
+        screen = pg.display.set_mode((WIDTH, HEIGHT))
+
+        # --- Show connecting screen ---
+        font = pg.font.SysFont(FONT_NAME, 33, bold=False)
+        # font2 = pg.font.SysFont(FONT_NAME, 25, bold=False)
+        screen.fill((20, 24, 32))
+        text = font.render("Connecting to BITalino Device...", True, (255, 255, 180))
+        rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40))
+        # text2 = font2.render(
+        #     "Please move your arm into the resting position ...", True, (255, 255, 180)
+        # )
+        # rect2 = text.get_rect(center=(WIDTH // 2 - 30, HEIGHT // 2 + 80))
+        screen.blit(text, rect)
+        # screen.blit(text2, rect2)
+        pg.display.flip()
+
+        eeg_ref = EEGBlinkInput()
+        try:
+            main(eeg_ref, screen)
+        finally:
+            if eeg_ref:
+                eeg_ref.close()
+            # quit the Qt app once game closes
+            QtCore.QTimer.singleShot(100, app.quit)
+
+    game_thread = threading.Thread(target=run_game, daemon=True)
+    game_thread.start()
+
+    # --- Plot update timer ---
+    def update_plot():
+        global eeg_ref
+        if eeg_ref is None:
+            return
+        with eeg_ref.buffer_lock:
+            data = eeg_ref.live_plot_buffer.copy()
+            offset = (eeg_ref.total_samples - len(data)) / EEG_FS
+        if data.size == 0:
+            return
+        t = offset + np.arange(len(data)) / EEG_FS
+        curve.setData(t, data, pen="w")
+        # print(f"Data size: {data.size}, Time range: {t[0]:.2f} to {t[-1]:.2f}")
+        plot.setXRange(max(0, t[-1] - MAX_VISIBLE_TIME), t[-1])
+        # print(f"Plot X range: {plot.viewRange()[0]}")
+        # print(f"t last: {t[-1]:.2f}, t first: {t[0]:.2f}")
+
+    timer = QtCore.QTimer()
+    timer.timeout.connect(update_plot)
+    timer.start(50)  # update every 50 ms
+
+    # --- Run the Qt loop (main thread) ---
+    app.exec_()
