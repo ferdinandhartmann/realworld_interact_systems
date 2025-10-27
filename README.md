@@ -29,7 +29,8 @@ Connect EEG to port A0. Place the two main nodes on your forehead 2cm apart and 
 
 ### Running Jump Game with EMG Hand flexing/streching Ratio detection
 
-...
+<img width="1410" height="787" alt="Screenshot from 2025-10-27 17-54-59" src="https://github.com/user-attachments/assets/ff25f82d-74ea-4b63-8db0-9ef647e00159" />
+
 
 ### Old Rock Paper Scissors Detection with KNN
 This project utilizes **rock_paper_scissor.ipynb** to detect hand movements for the game Rock, Paper, Scissors. It leverages data from **2 EMG sensors** and **1 accelerometer**.
