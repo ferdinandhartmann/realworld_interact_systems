@@ -101,9 +101,9 @@ def compute_heart_rate(signal, fs):
     # --- Adaptive threshold ---
     thr = np.percentile(filtered, 95) * 0.6
     thr = max(thr, 0.1)
-
     # --- Smooth signal slightly to suppress T-waves ---
-    filtered_smooth = np.convolve(filtered, np.ones(5)/5, mode='same')
+    smoothness = 5  # Smoothing window size (1 disables smoothing)
+    filtered_smooth = np.convolve(filtered, np.ones(smoothness)/smoothness, mode='same')
 
     # --- Require at least 0.6 s between R-peaks (≈100 BPM max) ---
     min_distance = int(fs * 0.6)

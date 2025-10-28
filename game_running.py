@@ -21,7 +21,7 @@ JUMP_BASE = 11  # base jump impulse
 JUMP_BOOST = 3.85  # scaled by flex [0..1]
 JUMP_BOOST_2 = 1.5  # scaled by flex [0..1]
 GRAVITY = 0.7
-AIR_DRAG = 0.99  # mild air damping
+AIR_DRAG = 0.99 # mild air damping
 DUCK_SCALE = 0.5
 EMG_JUMP_DEADZONE = 0.5
 EMG_DUCK_THRESHOLD = -0.09
@@ -34,7 +34,7 @@ LEVEL_UP_THRESHOLD = 10
 
 FONT_NAME = "arial"
 
-USE_EMG = False
+USE_EMG = True
 
 
 pg.mixer.init(frequency=44100, size=-16, channels=1)

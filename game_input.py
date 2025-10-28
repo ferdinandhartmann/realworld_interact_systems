@@ -52,7 +52,7 @@ class EMGInput(InputSource):
         self.ratio = 1.0
         self._running = True
         self.ext = 0.0
-        self.boost_ext = 12  # Factor to boost extensor stddev when above threshold
+        self.boost_ext = 1  # Factor to boost extensor stddev when above threshold
         self.boost_ext_threshold = 1.00  # Threshold for extensor stddev to apply boost
 
         self.thread = threading.Thread(target=self._reader, daemon=True)
@@ -154,7 +154,7 @@ class EEGBlinkInput(InputSource):
         self.buffer_lock = threading.Lock()
         self.threshold = threshold_uv  # µV threshold, same as reaction.py
         self.last_blink_time = 0.0
-        self.min_blink_interval = 0.05  # seconds to ignore double detections
+        self.min_blink_interval = 0.09  # seconds to ignore double detections
         self.blink_detected = 0.0
         self._running = True
         self.downsample_blink_detection = 0
